@@ -215,7 +215,7 @@ class MoEPriceTower(nn.Module):
         # 保存品类嵌入表引用（用于输入构建）
         self.cat_embedding = self.scenario_builder.cat_embedding
     
-    def forward(self, price, price_dev, time_dev, cat_dev, cat_ids, 
+    def forward(self, price, price_dev, time_dev, cat_dev, cat_ids,
                 pos_price=None, pos_cat_ids=None):
         """
         参数:
@@ -232,55 +232,39 @@ class MoEPriceTower(nn.Module):
             top_indices: (batch_size * maxlen, top_n) - 激活的账户索引
         """
         batch_size, maxlen = price.size()
-        
+
         # 1. 构建情景向量
         scenario_vectors = self.scenario_builder(price, price_dev, time_dev, cat_dev, cat_ids)
-        
+
         # 展平
         scenario_flat = scenario_vectors.view(-1, self.hidden_units)
-        
+
         # 2. 计算门控权重
         alpha, top_indices = self.account_prototype(
             scenario_flat, self.temperature, self.top_n
         )
-        
+
         # 3. 获取品类嵌入用于专家输入
         if pos_cat_ids is not None:
             cat_emb = self.cat_embedding(pos_cat_ids)  # (batch_size * maxlen, cat_emb_dim)
         else:
             cat_emb = self.cat_embedding(cat_ids.view(-1))
-        
+
         if pos_price is not None:
             expert_price = pos_price
         else:
             expert_price = price.view(-1, 1)
-        
-        # 4. 仅对被激活的TopN个专家执行前向计算
+
+        # 4. 向量化计算所有专家的输出，然后用alpha加权
+        # 所有专家同时前向计算（向量化）
         s_price = torch.zeros(scenario_flat.size(0), device=scenario_flat.device)
-        
-        for n in range(self.top_n):
-            # 获取第n个激活的专家索引
-            expert_idx = top_indices[:, n]  # (batch_size * maxlen,)
-            gate_weight = alpha[:, n]  # (batch_size * maxlen,) 注意：这里需要取对应位置的值
-            
-            # 获取实际激活的专家
-            unique_experts = torch.unique(expert_idx)
-            
-            for expert_id in unique_experts:
-                # 找到使用该专家的样本
-                mask = (expert_idx == expert_id)
-                if mask.sum() == 0:
-                    continue
-                
-                # 执行专家前向计算
-                expert_output = self.experts[expert_id](
-                    expert_price[mask],
-                    cat_emb[mask]
-                ).squeeze(-1)  # (num_activated,)
-                
-                # 加权累加
-                s_price[mask] += gate_weight[mask] * expert_output
-        
+
+        for k in range(self.num_accounts):
+            # 第k个专家对所有样本计算输出
+            expert_output = self.experts[k](expert_price, cat_emb).squeeze(-1)  # (batch_size * maxlen,)
+            # 用alpha加权累加
+            s_price += alpha[:, k] * expert_output
+
         return s_price, alpha, top_indices
     
     def compute_reg_loss(self, alpha):

@@ -153,13 +153,14 @@ def compute_price_deviation(seq, item_idx):
     """
     计算第item_idx个物品的价格偏离度
     严格防止数据泄露：只使用item_idx之前的历史数据
+    只使用对数数据，不进行Z-score归一化
     
     参数:
         seq: [(date, iid, price, cid), ...] 按时间排序的用户序列
         item_idx: 当前物品在序列中的索引
     
     返回:
-        price_deviation: 价格偏离度（Z-score归一化）
+        price_deviation: 价格偏离度（对数差值，未归一化）
         normalized_price: 品类内归一化后的价格（对数压缩后）
     """
     if item_idx <= 0:
@@ -174,27 +175,22 @@ def compute_price_deviation(seq, item_idx):
         if hist_cid == current_cid:
             historical_prices.append(hist_price)
     
-    if len(historical_prices) < 2:
-        # 历史数据不足，使用当前品类的全局统计信息
-        stats = cat_price_stats.get(current_cid, {'mean': 0, 'std': 1})
-        current_log_price = np.log1p(current_price)
-        normalized_price = (current_log_price - stats['mean']) / (stats['std'] + 1e-8)
-        return 0.0, float(normalized_price)
-    
-    # 计算历史同品类价格统计信息
-    historical_prices = np.array(historical_prices, dtype=np.float64)
-    log_hist_prices = np.log1p(historical_prices)
-    hist_mean = np.mean(log_hist_prices)
-    hist_std = np.std(log_hist_prices)
-    
     # 当前物品价格对数压缩
     current_log_price = np.log1p(current_price)
     
-    # Z-score归一化
-    if hist_std < 1e-8:
-        price_deviation = 0.0
-    else:
-        price_deviation = (current_log_price - hist_mean) / hist_std
+    if len(historical_prices) < 1:
+        # 历史数据不足，价格偏离度为0
+        stats = cat_price_stats.get(current_cid, {'mean': 0, 'std': 1})
+        normalized_price = (current_log_price - stats['mean']) / (stats['std'] + 1e-8)
+        return 0.0, float(normalized_price)
+    
+    # 计算历史同品类价格的对数均值
+    historical_prices = np.array(historical_prices, dtype=np.float64)
+    log_hist_prices = np.log1p(historical_prices)
+    hist_mean = np.mean(log_hist_prices)
+    
+    # 价格偏离度 = 当前对数价格 - 历史同品类对数价格均值（不进行Z-score归一化）
+    price_deviation = current_log_price - hist_mean
     
     # 使用全局品类统计信息进行价格归一化
     stats = cat_price_stats.get(current_cid, {'mean': 0, 'std': 1})
@@ -210,35 +206,46 @@ def compute_time_deviation(seq, item_idx):
     """
     计算第item_idx个物品的时间偏离度
     严格防止数据泄露：只使用item_idx之前的历史数据
+    在同品类内计算时间偏离度
     
     参数:
         seq: [(date, iid, price, cid), ...] 按时间排序的用户序列
         item_idx: 当前物品在序列中的索引
     
     返回:
-        time_deviation: 时间偏离度（Z-score归一化）
+        time_deviation: 时间偏离度（在同品类内计算，Z-score归一化）
     """
     if item_idx <= 0:
         return 0.0
     
-    current_date, _, _, _ = seq[item_idx]
+    current_date, _, _, current_cid = seq[item_idx]
     
-    # 计算历史时间间隔序列（只使用当前时刻之前的数据）
-    historical_intervals = []
-    for i in range(1, item_idx + 1):
-        prev_date, _, _, _ = seq[i - 1]
-        curr_date, _, _, _ = seq[i]
-        interval = abs(curr_date - prev_date)
-        historical_intervals.append(interval)
+    # 计算历史同品类时间间隔序列（只使用当前时刻之前的数据）
+    # 只考虑同品类的购买记录之间的时间间隔
+    same_cat_dates = []
+    for i in range(item_idx + 1):
+        date, _, _, cid = seq[i]
+        if cid == current_cid:
+            same_cat_dates.append(date)
     
-    if len(historical_intervals) < 2:
+    # 按时间排序（应该已经有序）
+    same_cat_dates.sort()
+    
+    # 计算同品类内的时间间隔
+    same_cat_intervals = []
+    for i in range(1, len(same_cat_dates)):
+        interval = abs(same_cat_dates[i] - same_cat_dates[i-1])
+        same_cat_intervals.append(interval)
+    
+    if len(same_cat_intervals) < 2:
+        # 同品类历史间隔不足2个，无法计算偏离度
         return 0.0
     
-    # 当前时间间隔
-    current_interval = historical_intervals[-1]
+    # 当前时间间隔（同品类内最后一个间隔）
+    current_interval = same_cat_intervals[-1]
     
     # 使用之前的历史间隔计算统计信息（防止数据泄露）
-    prev_intervals = np.array(historical_intervals[:-1], dtype=np.float64)
+    prev_intervals = np.array(same_cat_intervals[:-1], dtype=np.float64)
     hist_mean = np.mean(prev_intervals)
     hist_std = np.std(prev_intervals)
     

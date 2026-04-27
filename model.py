@@ -404,55 +404,91 @@ class SASRecMoE(nn.Module):
         
         return loss, auc
     
-    def predict(self, input_seq, item_idx, 
+    def predict(self, input_seq, item_idx,
                 price_seq=None, cat_seq=None,
-                time_dev_seq=None, price_dev_seq=None):
+                time_dev_seq=None, price_dev_seq=None,
+                item_prices=None, item_cats=None,
+                item_price_devs=None, item_time_devs=None):
         """
         预测阶段
         参数:
             input_seq: (1, maxlen) - 输入序列
             item_idx: (101,) - 候选物品
-            price_seq/cat_seq/time_dev_seq/price_dev_seq: 特征
+            price_seq/cat_seq/time_dev_seq/price_dev_seq: 序列特征
+            item_prices/item_cats/item_price_devs/item_time_devs: 候选物品特征 (101,)
         返回:
             logits: (101,) - 预测得分
         """
         with torch.no_grad():
             # 兴趣塔
             mask = (input_seq != 0).float().unsqueeze(-1)
-            
+
             seq = self.item_emb(input_seq)
             pos_enc = self.pos_encoding(seq)
             seq = seq + pos_enc
             seq = seq * mask
-            
+
             for i in range(self.args.num_blocks):
                 seq = self.attention_layers[i](seq, seq)
                 seq = seq * mask
                 seq = self.feedforward_layers[i](seq)
                 seq = seq * mask
-            
+
             seq = self.final_norm(seq)
-            
+
             seq_last = seq[:, -1, :]  # (1, hidden_units)
             item_emb = self.item_emb.embedding(item_idx)
-            
+
             s_interest = torch.matmul(seq_last, item_emb.t()).squeeze(0)  # (101,)
-            
+
             # 价格塔
-            if price_seq is not None and cat_seq is not None:
-                # 为每个候选物品计算价格得分
+            if (price_seq is not None and cat_seq is not None and
+                item_prices is not None and item_cats is not None):
                 item_count = item_idx.size(0)
-                s_price = torch.zeros(item_count, device=input_seq.device)
-                
-                for i in range(item_count):
-                    item_id = item_idx[i]
-                    # 获取该物品的价格、品类等特征（这里简化处理，实际需要从特征映射中获取）
-                    # 由于预测阶段可能没有完整的特征，使用默认值
-                    s_price[i] = 0.0
+
+                # 计算候选物品的品类偏离度
+                # 使用序列的品类嵌入平均池化作为历史参考
+                seq_cat_emb = self.price_tower.cat_embedding(cat_seq)  # (1, maxlen, cat_emb_dim)
+                seq_mask = (cat_seq != 0).unsqueeze(-1).float()  # (1, maxlen, 1)
+                hist_sum = (seq_cat_emb * seq_mask).sum(dim=1)  # (1, cat_emb_dim)
+                hist_count = seq_mask.sum(dim=1).clamp(min=1e-8)  # (1, 1)
+                hist_mean = hist_sum / hist_count  # (1, cat_emb_dim)
+
+                # 候选物品品类嵌入
+                item_cat_emb = self.price_tower.cat_embedding(item_cats)  # (101, cat_emb_dim)
+
+                # 计算品类偏离度: 1 - cosine(候选品类, 历史平均品类)
+                hist_mean_norm = F.normalize(hist_mean, dim=-1)  # (1, cat_emb_dim)
+                item_cat_emb_norm = F.normalize(item_cat_emb, dim=-1)  # (101, cat_emb_dim)
+                cosine_sim = torch.sum(hist_mean_norm * item_cat_emb_norm, dim=-1)  # (101,)
+                cat_dev_item = 1.0 - cosine_sim  # (101,)
+
+                # 使用MoEPriceTower的forward计算价格得分
+                # 将候选物品特征扩展为 (1, 101) 形状以匹配forward接口
+                price_batch = item_prices.unsqueeze(0)  # (1, 101)
+                price_dev_batch = item_price_devs.unsqueeze(0)  # (1, 101)
+                time_dev_batch = item_time_devs.unsqueeze(0)  # (1, 101)
+                cat_dev_batch = cat_dev_item.unsqueeze(0)  # (1, 101)
+                cat_ids_batch = item_cats.unsqueeze(0)  # (1, 101)
+
+                # 调用MoEPriceTower forward
+                s_price, _, _ = self.price_tower(
+                    price_batch,
+                    price_dev_batch,
+                    time_dev_batch,
+                    cat_dev_batch,
+                    cat_ids_batch,
+                    pos_price=price_batch.view(-1, 1),
+                    pos_cat_ids=cat_ids_batch.view(-1)
+                )
+
+                s_price = s_price.squeeze()  # (101,)
+                if s_price.dim() == 0:
+                    s_price = s_price.unsqueeze(0)
             else:
                 s_price = torch.zeros_like(s_interest)
-            
+
             # 双塔融合
             logits = s_interest + self.beta * s_price
-            
+
             return logits

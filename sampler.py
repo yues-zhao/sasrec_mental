@@ -135,11 +135,7 @@ def sample_function(user_train, usernum, itemnum, batch_size, maxlen, result_que
                 # Fill feature arrays
                 if use_features:
                     pos_feat = feat_dict.get(nxt, {})
-                    neg_feat = {}
-                    for f in features:
-                        if f['item'] == neg_item:
-                            neg_feat = f
-                            break
+                    neg_feat = feat_dict.get(neg_item, {})
                     
                     price_pos[idx] = pos_feat.get('price', 0.0)
                     cat_pos[idx] = pos_feat.get('category', 0)

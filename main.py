@@ -60,10 +60,11 @@ if __name__ == '__main__':
 
     # Load dataset
     if args.use_moe:
-        # 加载多特征数据
+        # 加载多特征数据（返回9个元素，包含item_features）
         dataset = data_partition(args.dataset, use_features=True)
         [user_train, user_valid, user_test, usernum, itemnum,
-         user_train_features, user_valid_features, user_test_features] = dataset
+         user_train_features, user_valid_features, user_test_features,
+         item_features] = dataset
     else:
         dataset = data_partition(args.dataset)
         [user_train, user_valid, user_test, usernum, itemnum] = dataset
@@ -92,13 +93,14 @@ if __name__ == '__main__':
         except:
             print('Warning: Could not load category mapping, using global sampling')
 
-    # Create sampler
+    # Create sampler (增加工作进程数以提高采样吞吐量)
+    n_workers = 4 if args.use_moe else 3
     if args.use_moe:
-        sampler = WarpSampler(user_train, usernum, itemnum, batch_size=args.batch_size, maxlen=args.maxlen, n_workers=3,
+        sampler = WarpSampler(user_train, usernum, itemnum, batch_size=args.batch_size, maxlen=args.maxlen, n_workers=n_workers,
                               use_features=True, user_train_features=user_train_features,
                               cat_item_map=cat_item_map, all_item_list=all_item_list)
     else:
-        sampler = WarpSampler(user_train, usernum, itemnum, batch_size=args.batch_size, maxlen=args.maxlen, n_workers=3)
+        sampler = WarpSampler(user_train, usernum, itemnum, batch_size=args.batch_size, maxlen=args.maxlen, n_workers=n_workers)
 
     # Create model
     if args.use_moe:
@@ -131,28 +133,28 @@ if __name__ == '__main__':
                      cat_seq, cat_pos, cat_neg,
                      price_dev_seq, price_dev_pos, price_dev_neg,
                      time_dev_seq, time_dev_pos, time_dev_neg) = batch_data
-                    
-                    # 转换为numpy数组再转tensor（避免警告）
-                    seq_tensor = torch.LongTensor(np.array(seq)).to(device)
-                    pos_tensor = torch.LongTensor(np.array(pos)).to(device)
-                    neg_tensor = torch.LongTensor(np.array(neg)).to(device)
-                    
-                    price_seq_t = torch.FloatTensor(np.array(price_seq)).to(device)
-                    price_pos_t = torch.FloatTensor(np.array(price_pos)).to(device)
-                    price_neg_t = torch.FloatTensor(np.array(price_neg)).to(device)
-                    
-                    cat_seq_t = torch.LongTensor(np.array(cat_seq)).to(device)
-                    cat_pos_t = torch.LongTensor(np.array(cat_pos)).to(device)
-                    cat_neg_t = torch.LongTensor(np.array(cat_neg)).to(device)
-                    
-                    price_dev_seq_t = torch.FloatTensor(np.array(price_dev_seq)).to(device)
-                    price_dev_pos_t = torch.FloatTensor(np.array(price_dev_pos)).to(device)
-                    price_dev_neg_t = torch.FloatTensor(np.array(price_dev_neg)).to(device)
-                    
-                    time_dev_seq_t = torch.FloatTensor(np.array(time_dev_seq)).to(device)
-                    time_dev_pos_t = torch.FloatTensor(np.array(time_dev_pos)).to(device)
-                    time_dev_neg_t = torch.FloatTensor(np.array(time_dev_neg)).to(device)
-                    
+
+                    # 使用pin_memory加速CPU->GPU传输
+                    seq_tensor = torch.LongTensor(np.array(seq)).to(device, non_blocking=True)
+                    pos_tensor = torch.LongTensor(np.array(pos)).to(device, non_blocking=True)
+                    neg_tensor = torch.LongTensor(np.array(neg)).to(device, non_blocking=True)
+
+                    price_seq_t = torch.FloatTensor(np.array(price_seq)).to(device, non_blocking=True)
+                    price_pos_t = torch.FloatTensor(np.array(price_pos)).to(device, non_blocking=True)
+                    price_neg_t = torch.FloatTensor(np.array(price_neg)).to(device, non_blocking=True)
+
+                    cat_seq_t = torch.LongTensor(np.array(cat_seq)).to(device, non_blocking=True)
+                    cat_pos_t = torch.LongTensor(np.array(cat_pos)).to(device, non_blocking=True)
+                    cat_neg_t = torch.LongTensor(np.array(cat_neg)).to(device, non_blocking=True)
+
+                    price_dev_seq_t = torch.FloatTensor(np.array(price_dev_seq)).to(device, non_blocking=True)
+                    price_dev_pos_t = torch.FloatTensor(np.array(price_dev_pos)).to(device, non_blocking=True)
+                    price_dev_neg_t = torch.FloatTensor(np.array(price_dev_neg)).to(device, non_blocking=True)
+
+                    time_dev_seq_t = torch.FloatTensor(np.array(time_dev_seq)).to(device, non_blocking=True)
+                    time_dev_pos_t = torch.FloatTensor(np.array(time_dev_pos)).to(device, non_blocking=True)
+                    time_dev_neg_t = torch.FloatTensor(np.array(time_dev_neg)).to(device, non_blocking=True)
+
                     # Forward pass
                     loss, auc = model(
                         seq_tensor, pos_tensor, neg_tensor,
@@ -164,11 +166,11 @@ if __name__ == '__main__':
                     )
                 else:
                     u, seq, pos, neg = batch_data
-                    
-                    seq_tensor = torch.LongTensor(np.array(seq)).to(device)
-                    pos_tensor = torch.LongTensor(np.array(pos)).to(device)
-                    neg_tensor = torch.LongTensor(np.array(neg)).to(device)
-                    
+
+                    seq_tensor = torch.LongTensor(np.array(seq)).to(device, non_blocking=True)
+                    pos_tensor = torch.LongTensor(np.array(pos)).to(device, non_blocking=True)
+                    neg_tensor = torch.LongTensor(np.array(neg)).to(device, non_blocking=True)
+
                     loss, auc = model(seq_tensor, pos_tensor, neg_tensor, is_training=True)
                 
                 # Backward pass

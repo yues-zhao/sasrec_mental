@@ -1,0 +1,13 @@
+batch_size,128
+dataset,TaFeng
+device,cuda
+dropout_rate,0.5
+hidden_units,50
+l2_emb,0.0
+lr,0.001
+maxlen,50
+num_blocks,2
+num_epochs,20
+num_heads,1
+seed,42
+train_dir,tafeng

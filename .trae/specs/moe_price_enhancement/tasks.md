@@ -1,0 +1,42 @@
+# Tasks
+- [x] Task 1: 创建增强数据预处理脚本，从原始CSV提取价格和品类特征
+  - [x] SubTask 1.1: 创建 data/enhanced_preprocess.py 脚本
+  - [x] SubTask 1.2: 实现品类内价格对数压缩
+  - [x] SubTask 1.3: 离线计算价格偏离度（防止数据泄露）
+  - [x] SubTask 1.4: 离线计算时间偏离度（防止数据泄露）
+  - [x] SubTask 1.5: 构建品类到商品映射字典 {cat_id: [item_id_list]}
+  - [x] SubTask 1.6: 输出增强数据集格式
+- [x] Task 2: 修改数据加载模块，支持多特征输入和混合负采样
+  - [x] SubTask 2.1: 修改 util.py 中的 data_partition 函数，加载多特征数据
+  - [x] SubTask 2.2: 修改 sampler.py 采样器，实现混合负采样逻辑（多商品品类用品类内负采样，单品品类用全局负采样）
+  - [x] SubTask 2.3: 采样器返回用户序列、正负样本序列及对应特征
+  - [x] SubTask 2.4: 测试数据加载和负采样流程
+- [x] Task 3: 实现MoE模块核心组件
+  - [x] SubTask 3.1: 创建 modules/moe_modules.py
+  - [x] SubTask 3.2: 实现情景向量构建模块
+  - [x] SubTask 3.3: 实现可学习账户原型与门控机制
+  - [x] SubTask 3.4: 实现MoE专家网络
+- [x] Task 4: 创建新模型类 SASRecMoE
+  - [x] SubTask 4.1: 修改 model.py，新增 SASRecMoE 类
+  - [x] SubTask 4.2: 实现品类偏离度在线计算
+  - [x] SubTask 4.3: 实现双塔融合逻辑（s = s_interest + β * s_price）
+  - [x] SubTask 4.4: 实现BPR损失函数计算
+  - [x] SubTask 4.5: 实现防坍缩正则项 L_reg = -λ × Σ α × log(α)
+  - [x] SubTask 4.6: 实现总损失 L_total = L_BPR + L_reg
+  - [x] SubTask 4.7: 实现 forward 和 predict 方法
+- [x] Task 5: 修改训练流程支持新模型
+  - [x] SubTask 5.1: 修改 main.py，添加MoE相关参数（num_experts, top_n, temperature, beta, lambda_reg）
+  - [x] SubTask 5.2: 修改评估函数支持新模型
+  - [x] SubTask 5.3: 测试完整训练流程
+- [x] Task 6: 运行端到端测试并验证
+  - [x] SubTask 6.1: 使用少量epoch测试完整流程
+  - [x] SubTask 6.2: 验证训练结果和日志输出
+  - [x] SubTask 6.3: 验证损失收敛和防坍缩效果
+  - [x] SubTask 6.4: 保存模型检查点
+
+# Task Dependencies
+- [Task 2] depends on [Task 1]
+- [Task 3] is independent (can be done in parallel with Task 1 and 2)
+- [Task 4] depends on [Task 2, Task 3]
+- [Task 5] depends on [Task 4]
+- [Task 6] depends on [Task 5]
